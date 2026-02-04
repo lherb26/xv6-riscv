@@ -40,7 +40,7 @@ worker(int id, int read_fd, int write_fd)
       break;
     }
 
-    if (strcmp(buf, ":quit") == 0) {
+    if (strcmp(buf, ":exit") == 0 || strcmp(buf, ":EXIT") == 0) {
       write(write_fd, buf, strlen(buf) + 1);
       break;
     }
@@ -85,65 +85,132 @@ main(int argc, char *argv[])
     exit(1);
   }
 
-  int pipes[MAXWORKERS + 1][2];
+  int pipes[MAXWORKERS + 1][2][2];
 
-  for (int i = 0; i <= n; i++) {
-    pipe(pipes[i]);
+  for (int i = 1; i <= n; i++) {
+    pipe(pipes[i][0]);
+    pipe(pipes[i][1]);
   }
 
   for (int i = 1; i <= n; i++) {
     int pid = fork();
     if (pid == 0) {
       // Worker process
-      for (int j = 0; j <= n; j++) {
-        if (j != i - 1) close(pipes[j][0]);
-        if (j != i) close(pipes[j][1]);
+      for (int j = 1; j <= n; j++) {
+        if (j != i) {
+          close(pipes[j][0][0]);
+          close(pipes[j][0][1]);
+          close(pipes[j][1][0]);
+          close(pipes[j][1][1]);
+        }
       }
 
-      worker(i, pipes[i - 1][0], pipes[i][1]);
+      close(pipes[i][0][1]);
+      close(pipes[i][1][0]);
+
+      worker(i, pipes[i][0][0], pipes[i][1][1]);
     }
   }
 
   // Parent
-  for (int i = 0; i <= n; i++) {
-    if (i != n) close(pipes[i][0]);
-    if (i != 0) close(pipes[i][1]);
+  for (int i = 1; i <= n; i++) {
+    close(pipes[i][0][0]);
+    close(pipes[i][1][1]);
   }
 
-  char buf[MAXLINE];
+  char command[MAXLINE];
+  char mode[MAXLINE];
+  char result[MAXLINE];
 
   while (1) {
     printf("Enter command: ");
-    memset(buf, 0, sizeof(buf));
-    gets(buf, sizeof(buf));
-    strip_newline(buf);
+    memset(command, 0, sizeof(command));
+    gets(command, sizeof(command));
+    strip_newline(command);
 
-    write(pipes[0][1], buf, strlen(buf) + 1);
+    //luke code
+    memset(result, 0, sizeof(result));
 
-    if (strcmp(buf, ":quit") == 0) {
+    // //do i need to do this?
+    // if (strcmp(mode, ":exit") == 0 || strcmp(mode, ":EXIT") == 0) {
+    //   break;
+
+    // }
+
+    printf("Mode (:all | :first k | :skip k): ");
+    memset(mode, 0, sizeof(mode));
+    gets(mode, sizeof(mode));
+    strip_newline(mode);
+
+    if (strcmp(mode, ":exit") == 0 || strcmp(mode, ":EXIT") == 0) {
+      for (int i = 1; i <= n; i++) {
+        write(pipes[i][0][1], ":exit", 6);
+      }
       break;
-    } else if (strcmp(buf, ":all") == 0) {
-      //do all things
-      //check that the og is whats wanted here
-      memset(buf, 0, sizeof(buf));
-      read(pipes[n][0], buf, sizeof(buf));
 
-      printf("Result: %s\n", buf);
-    } else if (strcmp(buf, ":first")) {
+    } else if (strcmp(mode, ":all") == 0) {
+      strcpy(result, command);
+
+      for (int i = 1; i <= n; i++) {
+        write(pipes[i][0][1], result, strlen(result) + 1);
+        read(pipes[i][1][0], result, sizeof(result));
+      }
+
+      printf("Result: %s\n", result);
+     } else if (
+        mode[0] == ':' &&
+        mode[1] == 'f' &&
+        mode[2] == 'i' &&
+        mode[3] == 'r' &&
+        mode[4] == 's' &&
+        mode[5] == 't' &&
+        mode[6] == ' '
+      ) {  //strings dont work here, just check every char I hate this :(
       //get k things then do k things
-    } else if (strcmp(buf, ":skip")) {
-      //skip worker k during processing 
-    }
-    
+      int k = atoi(mode + 7);
 
-    
+      if (k >= 1 && k <= n) {
+        strcpy(result, command);
+
+        for (int i = 1; i <= k; i++) {
+          write(pipes[i][0][1], result, strlen(result) + 1);
+          read(pipes[i][1][0], result, sizeof(result));
+        }
+
+        printf("Result: %s\n", result);
+      }
+
+    } else if (
+        mode[0] == ':' &&
+        mode[1] == 's' &&
+        mode[2] == 'k' &&
+        mode[3] == 'i' &&
+        mode[4] == 'p' &&
+        mode[5] == ' '
+      ) {
+      //skip worker k during processing 
+      int k = atoi(mode + 6);
+
+      if (k < 1 || k > n) {
+        printf("worker %d does not exist\n", k);
+        continue;
+      }
+
+      strcpy(result, command);
+
+      for (int i = 1; i <= n; i++) {
+        if (i == k) continue;
+        write(pipes[i][0][1], result, strlen(result) + 1);
+        read(pipes[i][1][0], result, sizeof(result));
+      }
+
+      printf("Result: %s\n", result);
+    }
   }
 
-  for (int i = 0; i < n; i++)
+  for (int i = 0; i < n; i++) {
     wait(0);
-
-  close(pipes[0][1]);
-  close(pipes[n][0]);
+  }
 
   exit(0);
 }
