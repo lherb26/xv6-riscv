@@ -1,4 +1,4 @@
-// relay_sample.c
+// relay_plus.c
 //
 // A simple multi-process command relay for xv6-riscv.
 // One parent process and N worker processes connected via pipes.
@@ -85,7 +85,7 @@ main(int argc, char *argv[])
     exit(1);
   }
 
-  int pipes[MAXWORKERS + 1][2][2];
+  int pipes[MAXWORKERS + 1][2][2];  //added more here
 
   for (int i = 1; i <= n; i++) {
     pipe(pipes[i][0]);
@@ -98,6 +98,7 @@ main(int argc, char *argv[])
       // Worker process
       for (int j = 1; j <= n; j++) {
         if (j != i) {
+          //close all pipes
           close(pipes[j][0][0]);
           close(pipes[j][0][1]);
           close(pipes[j][1][0]);
