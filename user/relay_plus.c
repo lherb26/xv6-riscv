@@ -129,14 +129,7 @@ main(int argc, char *argv[])
     gets(command, sizeof(command));
     strip_newline(command);
 
-    //luke code
     memset(result, 0, sizeof(result));
-
-    // //do i need to do this?
-    // if (strcmp(mode, ":exit") == 0 || strcmp(mode, ":EXIT") == 0) {
-    //   break;
-
-    // }
 
     printf("Mode (:all | :first k | :skip k): ");
     memset(mode, 0, sizeof(mode));
