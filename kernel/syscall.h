@@ -20,3 +20,7 @@
 #define SYS_link   19
 #define SYS_mkdir  20
 #define SYS_close  21
+#define SYS_getprocinfo 25
+#define SYS_blockchild 26
+#define SYS_unblockchild 27
+#define SYS_getresourceusage 28

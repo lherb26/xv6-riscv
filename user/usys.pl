@@ -42,3 +42,7 @@ entry("getpid");
 entry("sbrk");
 entry("pause");
 entry("uptime");
+entry("getprocinfo");
+entry("blockchild");
+entry("unblockchild");
+entry("getresourceusage");

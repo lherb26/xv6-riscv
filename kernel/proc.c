@@ -169,6 +169,12 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+
+  p->state_extra = UNBLOCKED;
+  p->cpuTicks = 0;
+  p->syscallCount = 0;
+  p->contextSwitches = 0;
+  p->sleepCount = 0;
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -440,12 +446,13 @@ scheduler(void)
     int found = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
-      if(p->state == RUNNABLE) {
+      if(p->state == RUNNABLE && p->state_extra == UNBLOCKED) {        
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        p->contextSwitches++;
         swtch(&c->context, &p->context);
 
         // Process is done running for now.
@@ -558,6 +565,7 @@ sleep(void *chan, struct spinlock *lk)
   p->chan = chan;
   p->state = SLEEPING;
 
+  p->sleepCount++;
   sched();
 
   // Tidy up.
@@ -687,4 +695,84 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+//Blocks a child of the calling process
+int
+blockchild(int pid)
+{
+  struct proc *caller = myproc();
+  struct proc *p;
+
+  for(p = proc; p < &proc[NPROC]; p++){
+    acquire(&p->lock);
+    if(p->pid == pid){
+      if(p->parent != caller){
+        release(&p->lock);
+        return -1;
+      }
+      if(p->state == UNUSED || p->state == ZOMBIE){
+        release(&p->lock);
+        return -1;
+      }
+      if(p->state_extra == BLOCKED){
+        release(&p->lock);
+        return -1;
+      }
+      p->state_extra = BLOCKED;
+      release(&p->lock);
+      return 0;
+    }
+    release(&p->lock);
+  }
+  return -1;
+}
+
+//unblocks the child of the calling process
+int
+unblockchild(int pid)
+{
+  struct proc *caller = myproc();
+  struct proc *p;
+
+  for(p = proc; p < &proc[NPROC]; p++){
+    acquire(&p->lock);
+    if(p->pid == pid){
+      if(p->parent != caller){
+        release(&p->lock);
+        return -1;
+      }
+      if(p->state == UNUSED || p->state == ZOMBIE){
+        release(&p->lock);
+        return -1;
+      }
+      if(p->state_extra == UNBLOCKED){
+        release(&p->lock);
+        return -1;
+      }
+      p->state_extra = UNBLOCKED;
+      release(&p->lock);
+      return 0;
+    }
+    release(&p->lock);
+  }
+  return -1;
+}
+
+// copies the data of the caller to the user space
+int
+getresourceusage(uint64 uaddr)
+{
+  struct proc *p = myproc();
+  struct resource_usage usage;
+
+  usage.cpuTicks = p->cpuTicks;
+  usage.syscallCount = p->syscallCount;
+  usage.contextSwitches = p->contextSwitches;
+  usage.sleepCount = p->sleepCount;
+
+  if(copyout(p->pagetable, uaddr, (char *)&usage, sizeof(usage)) < 0)
+    return -1;
+
+  return p->pid;
 }

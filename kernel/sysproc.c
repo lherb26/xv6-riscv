@@ -107,3 +107,75 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+//code from class
+uint64
+sys_getprocinfo(void)
+{
+  struct proc *p;
+  struct proc_info info;
+  uint64 uaddr;
+  /*
+  * myproc() returns a pointer to the struct proc
+  * corresponding to the currently running process.
+  * It is the standard way in xv6 to access the caller's
+  * process control block.
+  */
+  p = myproc();
+  /*
+  * TODO:
+  * Copy the relevant fields from the process control block
+  * (struct proc *p) into the local struct proc_info 'info'.
+  *
+  * You should populate at least:
+  * - pid
+  * - ppid (use p->parent if it exists)
+  * - state
+  * - sz (memory size)
+  */
+  info.pid = p->pid;
+  info.ppid = p->parent ? p->parent->pid : 0;
+  info.state = p->state;
+  info.sz = p->sz;
+
+  /*
+  * argaddr() retrieves the user-space address of the first
+  * argument passed to the system call. In this case, it is
+  * the pointer where the proc_info structure should be copied.
+  */
+  argaddr(0, &uaddr);
+  /*
+  * copyout() safely copies data from kernel space to user space.
+  * It takes the destination page table, user address, kernel
+  * source address, and number of bytes to copy.
+  *
+  * The function returns a negative value on failure.
+  */
+  if(copyout(p->pagetable, uaddr, (char *)&info, sizeof(info)) < 0)
+    return -1;
+  return 0;
+}
+
+uint64
+sys_blockchild(void)
+{
+  int pid;
+  argint(0, &pid);
+  return blockchild(pid);
+}
+
+uint64
+sys_unblockchild(void)
+{
+  int pid;
+  argint(0, &pid);
+  return unblockchild(pid);
+}
+
+uint64
+sys_getresourceusage(void)
+{
+  uint64 uaddr;
+  argaddr(0, &uaddr);
+  return getresourceusage(uaddr);
+}

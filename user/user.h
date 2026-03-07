@@ -2,6 +2,21 @@
 
 struct stat;
 
+//information onn user side for recieving then printing info
+struct proc_info {
+  int pid;
+  int ppid;
+  int state;
+  uint64 sz;
+};
+//more info here
+struct resource_usage {
+  int cpuTicks;
+  int syscallCount;
+  int contextSwitches;
+  int sleepCount;
+};
+
 // system calls
 int fork(void);
 int exit(int) __attribute__((noreturn));
@@ -47,3 +62,8 @@ void printf(const char*, ...) __attribute__ ((format (printf, 1, 2)));
 // umalloc.c
 void* malloc(uint);
 void free(void*);
+
+int getprocinfo(struct proc_info *info);
+int blockchild(int);
+int unblockchild(int);
+int getresourceusage(struct resource_usage *usage);

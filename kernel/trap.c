@@ -53,6 +53,7 @@ usertrap(void)
   
   if(r_scause() == 8){
     // system call
+    myproc()->syscallCount++;
 
     if(killed(p))
       kexit(-1);
@@ -81,9 +82,12 @@ usertrap(void)
     kexit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2) {
+    if(myproc()->state == RUNNING) {  //checks my new info tag to see if process is running 
+      myproc()->cpuTicks++;   //if is running update cpuTicks
+    }
     yield();
-
+  }
   prepare_return();
 
   // the user page table to switch to, for trampoline.S

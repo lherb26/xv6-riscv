@@ -80,6 +80,7 @@ struct trapframe {
 };
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
+enum procstate_extra { UNBLOCKED, BLOCKED };  //extra information I can use to block/unblock a process
 
 // Per-process state
 struct proc {
@@ -104,4 +105,25 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  //data needed to report back to procmon
+  enum procstate_extra state_extra;
+  int cpuTicks;
+  int syscallCount;
+  int contextSwitches;
+  int sleepCount;
+};
+
+struct proc_info {
+  int pid; // process ID
+  int ppid; // parent process ID
+  int state; // current process state
+  uint64 sz; // size of process memory (bytes)
+};
+
+struct resource_usage {
+  int cpuTicks;
+  int syscallCount;
+  int contextSwitches;
+  int sleepCount;
 };
