@@ -107,3 +107,29 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+//starts the pirority RR scheduler
+uint64
+sys_startPriority(void)
+{
+    int m, n;
+    argint(0, &m);
+    argint(1, &n);
+    return startPriority(m, n);
+}
+
+//stops the pirority RR scheduler
+uint64
+sys_stopPriority(void)
+{
+    return stopPriority();
+}
+
+//gets info about the pirority RR scheduler
+uint64
+sys_getPriorityInfo(void)
+{
+    uint64 addr;
+    argaddr(0, &addr);
+    return getPriorityInfo((struct PriorityInfoReport*)addr);
+}

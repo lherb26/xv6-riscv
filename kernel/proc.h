@@ -1,3 +1,16 @@
+#define PRIORITY_MAX_LEVEL 10
+
+struct PriorityInfoReport {
+    int tickCounts[PRIORITY_MAX_LEVEL];
+};
+
+// node for the priority queue linked list
+struct pq_node {
+    struct proc *proc;
+    struct pq_node *next;
+    struct pq_node *prev;
+};
+
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -104,4 +117,10 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  int priority;                // current priority
+  int ticksOnQueue;            // ticks run on current queue
+  int inPriorityQueue;         // 1 if currently inserted in a priority queue  
+  int ticksWaited;             // ticks waited on current queue
+  int tickCounts[PRIORITY_MAX_LEVEL];     // total ticks run at each level
 };

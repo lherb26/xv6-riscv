@@ -1,6 +1,10 @@
 #define SBRK_ERROR ((char *)-1)
+#define PRIORITY_MAX_LEVEL 10
 
 struct stat;
+struct PriorityInfoReport {
+    int tickCounts[PRIORITY_MAX_LEVEL];
+};
 
 // system calls
 int fork(void);
@@ -24,6 +28,9 @@ int getpid(void);
 char* sys_sbrk(int,int);
 int pause(int);
 int uptime(void);
+int startPriority(int, int);
+int stopPriority(void);
+int getPriorityInfo(struct PriorityInfoReport*);
 
 // ulib.c
 int stat(const char*, struct stat*);

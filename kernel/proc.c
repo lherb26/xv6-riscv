@@ -26,6 +26,80 @@ extern char trampoline[]; // trampoline.S
 // must be acquired before any p->lock.
 struct spinlock wait_lock;
 
+int priorityFlag = 0;               // 1 if priority scheduler is active
+int priorityLevels = 0;             // number of priority levels
+int maxTicksToBoost = 0;            // ticks before aging boost
+
+// Priority queues
+struct pq_node *pq_head[PRIORITY_MAX_LEVEL];
+struct pq_node *pq_tail[PRIORITY_MAX_LEVEL];
+
+// Pool of queue nodes (one per process slot)
+struct pq_node pq_nodes[NPROC];
+
+// Enqueue a process at the tail of the given priority level queue
+void
+priority_enqueue(int level, struct proc *p)
+{
+    // Find the node in the pool corresponding to this process
+    struct pq_node *node = &pq_nodes[p - proc]; // index by proc array offset
+    node->proc = p;
+    node->next = 0;
+    node->prev = pq_tail[level];
+
+    if (pq_tail[level] != 0)
+        pq_tail[level]->next = node;
+    else
+        pq_head[level] = node; // queue was empty
+
+    pq_tail[level] = node;
+    p->inPriorityQueue = 1;
+    p->priority = level;
+    p->ticksOnQueue = 0;
+    p->ticksWaited = 0;
+}
+
+// Remove and return the process at the head of the given priority level queue
+struct proc*
+priority_dequeue(int level)
+{
+    if (pq_head[level] == 0)
+        return 0;
+
+    struct pq_node *node = pq_head[level];
+    pq_head[level] = node->next;
+    if (pq_head[level] != 0)
+        pq_head[level]->prev = 0;
+    else
+        pq_tail[level] = 0; // queue is now empty
+
+    node->next = 0;
+    node->prev = 0;
+    node->proc->inPriorityQueue = 0;
+    return node->proc;
+}
+
+// Remove a specific process from whatever level queue it's in
+void
+priority_delete(int level, struct proc *p)
+{
+    struct pq_node *node = &pq_nodes[p - proc];
+
+    if (node->prev != 0)
+        node->prev->next = node->next;
+    else
+        pq_head[level] = node->next; // was head
+
+    if (node->next != 0)
+        node->next->prev = node->prev;
+    else
+        pq_tail[level] = node->prev; // was tail
+
+    node->next = 0;
+    node->prev = 0;
+    p->inPriorityQueue = 0;
+}
+
 // Allocate a page for each process's kernel stack.
 // Map it high in memory, followed by an invalid
 // guard page.
@@ -146,6 +220,13 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  p->priority = -1;
+  p->ticksOnQueue = 0;
+  p->ticksWaited = 0;
+  p->inPriorityQueue = 0;
+  for (int i = 0; i < PRIORITY_MAX_LEVEL; i++)
+      p->tickCounts[i] = 0;
+
   return p;
 }
 
@@ -169,6 +250,13 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+
+  p->priority = -1;
+  p->ticksOnQueue = 0;
+  p->ticksWaited = 0;
+  p->inPriorityQueue = 0;
+  for (int i = 0; i < PRIORITY_MAX_LEVEL; i++)
+      p->tickCounts[i] = 0;
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -414,52 +502,128 @@ kwait(uint64 addr)
   }
 }
 
-// Per-CPU process scheduler.
-// Each CPU calls scheduler() after setting itself up.
-// Scheduler never returns.  It loops, doing:
-//  - choose a process to run.
-//  - swtch to start running that process.
-//  - eventually that process transfers control
-//    via swtch back to the scheduler.
+//updated scheduler to use when RR is selected
+void
+Priority_scheduler(struct cpu *c)
+{
+  struct proc *p = 0;
+
+    while (priorityFlag) {
+
+            // If the current process is still runnable or running        
+        if (p != 0 && p->state == RUNNABLE) {
+            // Increment tick count for the current queue
+            // Check if the time quantum expires
+            p->ticksOnQueue++;
+            p->tickCounts[p->priority]++;
+
+            int quantum = 2 * (p->priority + 1);
+            if (p->ticksOnQueue >= quantum) {
+                // demote
+                int newLevel = p->priority + 1;
+                if (newLevel >= priorityLevels)
+                    newLevel = priorityLevels - 1;
+                priority_enqueue(newLevel, p); // resets ticksOnQueue + ticksWaited
+                p = 0;
+            }
+            // If quantum not expired p stays selected and runs again
+        } else if (p != 0) {
+            p = 0;
+        }
+
+        for (struct proc *np = proc; np < &proc[NPROC]; np++) {
+            acquire(&np->lock);
+            if (np->state == RUNNABLE && !np->inPriorityQueue && np != p) {
+                int startLevel;
+                if (np->priority == -1)
+                    startLevel = priorityLevels / 2; // new proc
+                else
+                    startLevel = np->priority;
+                priority_enqueue(startLevel, np);
+            }
+            release(&np->lock);
+        }
+
+        // aging
+        for (int i = 1; i < priorityLevels; i++) {
+            struct pq_node *node = pq_head[i];
+            while (node != 0) {
+                struct pq_node *next = node->next;
+                if (node->proc->state == RUNNABLE) {
+                    node->proc->ticksWaited++;
+                    if (node->proc->ticksWaited >= maxTicksToBoost) {
+                        struct proc *bp = node->proc;
+                        priority_delete(i, bp);
+                        priority_enqueue(i - 1, bp);
+                    }
+                }
+                node = next;
+            }
+        }
+
+        if (p == 0) {
+            for (int i = 0; i < priorityLevels && p == 0; i++) {
+                struct pq_node *node = pq_head[i];
+                while (node != 0) {
+                    if (node->proc->state == RUNNABLE) {
+                        p = node->proc;
+                        priority_delete(i, p);
+                        break;
+                    }
+                    node = node->next;
+                }
+            }
+        }
+
+        if (p != 0) {
+            acquire(&p->lock);
+            if (p->state == RUNNABLE) {
+                p->state = RUNNING;
+                c->proc = p;
+                swtch(&c->context, &p->context);
+                c->proc = 0;
+            } else {
+                p = 0;
+            }
+            release(&p->lock);
+        }
+    }
+}
+
+// Round-Robin scheduler.
+// Iterates through the process table and runs each RUNNABLE process.void
+RR_scheduler(struct cpu *c)
+{
+  struct proc *p;
+
+  for (p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if (p->state == RUNNABLE) {
+      // Switch to the chosen process.
+      p->state = RUNNING;
+      c->proc = p;
+      swtch(&c->context, &p->context);
+      // Process has finished running for now.
+      c->proc = 0;
+    }
+  release(&p->lock);
+  }
+}
+
+// Main scheduler — dispatches to Priority or RR
 void
 scheduler(void)
 {
-  struct proc *p;
-  struct cpu *c = mycpu();
-
-  c->proc = 0;
-  for(;;){
-    // The most recent process to run may have had interrupts
-    // turned off; enable them to avoid a deadlock if all
-    // processes are waiting. Then turn them back off
-    // to avoid a possible race between an interrupt
-    // and wfi.
-    intr_on();
-    intr_off();
-
-    int found = 0;
-    for(p = proc; p < &proc[NPROC]; p++) {
-      acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
-
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-        found = 1;
-      }
-      release(&p->lock);
+    struct cpu *c = mycpu();
+    c->proc = 0;
+    for (;;) {
+        intr_on();
+        if (priorityFlag) {
+            Priority_scheduler(c);
+        } else {
+            RR_scheduler(c);
+        }
     }
-    if(found == 0) {
-      // nothing to run; stop running on this core until an interrupt.
-      asm volatile("wfi");
-    }
-  }
 }
 
 // Switch to scheduler.  Must hold only p->lock
@@ -687,4 +851,54 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+// Start the priority scheduler with m levels and aging threshold n
+int
+startPriority(int m, int n)
+{
+    if (m <= 0 || m > PRIORITY_MAX_LEVEL || n <= 0)
+        return -1;
+
+    // Initialize queue heads/tails
+    for (int i = 0; i < PRIORITY_MAX_LEVEL; i++) {
+        pq_head[i] = 0;
+        pq_tail[i] = 0;
+    }
+
+    priorityLevels = m;
+    maxTicksToBoost = n;
+    priorityFlag = 1;  // scheduler will pick this up
+    return 0;
+}
+
+// Stop the priority scheduler and return to RR
+int
+stopPriority(void)
+{
+    priorityFlag = 0;
+
+    // Clear inPriorityQueue flag for all processes
+    for (struct proc *p = proc; p < &proc[NPROC]; p++) {
+        p->inPriorityQueue = 0;
+    }
+
+    // Clear all queue pointers
+    for (int i = 0; i < PRIORITY_MAX_LEVEL; i++) {
+        pq_head[i] = 0;
+        pq_tail[i] = 0;
+    }
+
+    return 0;
+}
+
+// Copy calling process's tick history into the report struct
+int
+getPriorityInfo(struct PriorityInfoReport *report)
+{
+    struct proc *p = myproc();
+    if (copyout(p->pagetable, (uint64)report, (char*)&p->tickCounts,
+                sizeof(p->tickCounts)) < 0)
+        return -1;
+    return 0;
 }
